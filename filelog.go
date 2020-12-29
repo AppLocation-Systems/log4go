@@ -4,9 +4,11 @@ package log4go
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
-	"time"
+	"path/filepath"
 	"strings"
+	"time"
 )
 
 // This log writer sends output to a file
@@ -34,6 +36,7 @@ type FileLogWriter struct {
 
 	// Rotate daily
 	daily          bool
+	maxdays        int
 	daily_opendate int
 
 	// Keep old logfiles (.001, .002, etc)
@@ -41,7 +44,7 @@ type FileLogWriter struct {
 	maxbackup int
 
 	// Sanitize newlines to prevent log injection
-	sanitize	bool
+	sanitize bool
 }
 
 // This is the FileLogWriter's output method
@@ -52,6 +55,25 @@ func (w *FileLogWriter) LogWrite(rec *LogRecord) {
 func (w *FileLogWriter) Close() {
 	close(w.rec)
 	w.file.Sync()
+}
+
+func (w *FileLogWriter) isOlderThan(t time.Time) bool {
+
+	// Default if maxDays isn't set
+	if w.maxdays <= 0 {
+		w.maxdays = 4
+	}
+
+	// Get number of hours
+	nHours := time.Now().Sub(t).Hours()
+
+	// Compare
+	if nHours > float64(w.maxdays)*24 {
+		return true
+	}
+
+	return false
+
 }
 
 // NewFileLogWriter creates a new LogWriter which writes to the given file and
@@ -72,6 +94,7 @@ func NewFileLogWriter(fname string, rotate bool, daily bool) *FileLogWriter {
 		daily:     daily,
 		rotate:    rotate,
 		maxbackup: 5,
+		maxdays:   4,
 		sanitize:  false, // set to false so as not to break compatibility
 	}
 	// open the file for the first time
@@ -171,6 +194,39 @@ func (w *FileLogWriter) intRotate() error {
 				if err != nil {
 					return fmt.Errorf("Rotate: %s\n", err)
 				}
+
+				// Get the log directory
+				logDir := filepath.Dir(w.filename)
+				// Get info for all files in log directory
+				logfiles, err := ioutil.ReadDir(logDir)
+
+				if err != nil {
+					return fmt.Errorf("Rotate: %s\n", err)
+				}
+
+				for _, file := range logfiles {
+
+					if file.Mode().IsRegular() &&
+						w.isOlderThan(file.ModTime()) {
+
+						// Are these the log files we want?
+						if !strings.HasPrefix(file.Name(), filepath.Base(w.filename)) {
+							continue
+						}
+
+						filePath := logDir + string(os.PathSeparator) + file.Name()
+						fmt.Printf("Rotate: Removing Expired Logfile: %s", filePath)
+
+						err := os.Remove(filePath)
+
+						if err != nil {
+							return fmt.Errorf("Rotate: %s\n", err)
+						}
+
+					}
+
+				}
+
 			} else if !w.daily {
 				num = w.maxbackup - 1
 				for ; num >= 1; num-- {
@@ -252,6 +308,11 @@ func (w *FileLogWriter) SetRotateSize(maxsize int) *FileLogWriter {
 func (w *FileLogWriter) SetRotateDaily(daily bool) *FileLogWriter {
 	//fmt.Fprintf(os.Stderr, "FileLogWriter.SetRotateDaily: %v\n", daily)
 	w.daily = daily
+	return w
+}
+
+func (w *FileLogWriter) SetMaxDays(maxdays int) *FileLogWriter {
+	w.maxdays = maxdays
 	return w
 }
 
