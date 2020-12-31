@@ -76,6 +76,67 @@ func (w *FileLogWriter) isOlderThan(t time.Time) bool {
 
 }
 
+func (w *FileLogWriter) RemoveOldDailyLogs(debug bool) error {
+
+	if debug {
+		fmt.Printf("Current FilePath: %s\n", w.filename)
+		fmt.Printf("Max Days: %d\n", w.maxdays)
+	}
+
+	// Get the log directory
+	logDir := filepath.Dir(w.filename)
+	// Get info for all files in log directory
+	logfiles, err := ioutil.ReadDir(logDir)
+
+	if debug {
+		fmt.Printf("Removing old daily logs from: %s\n", logDir)
+	}
+
+	if err != nil {
+
+		if debug {
+			fmt.Printf("Error Reading Directory %s, %s\n", logDir, err.Error())
+		}
+
+		return fmt.Errorf("RemoveOldDailyLogs: %s", err)
+
+	}
+
+	for _, file := range logfiles {
+
+		if file.Mode().IsRegular() &&
+			w.isOlderThan(file.ModTime()) {
+
+			filePrefix := filepath.Base(w.filename)
+
+			if debug {
+				fmt.Printf("FileName: %s, FilePrefix: %s\n", file.Name(), filePrefix)
+			}
+
+			// Are these the log files we want?
+			if !strings.HasPrefix(file.Name(), filePrefix) {
+				continue
+			}
+
+			filePath := logDir + string(os.PathSeparator) + file.Name()
+
+			if debug {
+				fmt.Printf("Rotate: Removing Expired Logfile: %s\n", filePath)
+			}
+
+			err := os.Remove(filePath)
+
+			if err != nil {
+				return fmt.Errorf("RemoveOldDailyLogs: %s", err)
+			}
+
+		}
+
+	}
+
+	return nil
+}
+
 // NewFileLogWriter creates a new LogWriter which writes to the given file and
 // has rotation enabled if rotate is true.
 //
@@ -97,7 +158,11 @@ func NewFileLogWriter(fname string, rotate bool, daily bool) *FileLogWriter {
 		maxdays:   4,
 		sanitize:  false, // set to false so as not to break compatibility
 	}
-	// open the file for the first time
+
+	// TODO:
+	// Fix this for Kevin, since we want the log to resume
+	// writing to the last file it left off at instead of rolling
+	// over a new file everytime we restart.
 	if err := w.intRotate(); err != nil {
 		fmt.Fprintf(os.Stderr, "FileLogWriter(%q): %s\n", w.filename, err)
 		return nil
@@ -195,36 +260,9 @@ func (w *FileLogWriter) intRotate() error {
 					return fmt.Errorf("Rotate: %s\n", err)
 				}
 
-				// Get the log directory
-				logDir := filepath.Dir(w.filename)
-				// Get info for all files in log directory
-				logfiles, err := ioutil.ReadDir(logDir)
-
+				err = w.RemoveOldDailyLogs(false)
 				if err != nil {
 					return fmt.Errorf("Rotate: %s\n", err)
-				}
-
-				for _, file := range logfiles {
-
-					if file.Mode().IsRegular() &&
-						w.isOlderThan(file.ModTime()) {
-
-						// Are these the log files we want?
-						if !strings.HasPrefix(file.Name(), filepath.Base(w.filename)) {
-							continue
-						}
-
-						filePath := logDir + string(os.PathSeparator) + file.Name()
-						fmt.Printf("Rotate: Removing Expired Logfile: %s", filePath)
-
-						err := os.Remove(filePath)
-
-						if err != nil {
-							return fmt.Errorf("Rotate: %s\n", err)
-						}
-
-					}
-
 				}
 
 			} else if !w.daily {

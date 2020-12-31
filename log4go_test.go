@@ -153,7 +153,7 @@ func TestFileLogWriter(t *testing.T) {
 	}(LogBufferLength)
 	LogBufferLength = 0
 
-	w := NewFileLogWriter(testLogFile, false)
+	w := NewFileLogWriter(testLogFile, false, false)
 	if w == nil {
 		t.Fatalf("Invalid return: w should not be nil")
 	}
@@ -176,7 +176,7 @@ func TestXMLLogWriter(t *testing.T) {
 	}(LogBufferLength)
 	LogBufferLength = 0
 
-	w := NewXMLLogWriter(testLogFile, false)
+	w := NewXMLLogWriter(testLogFile, false, false)
 	if w == nil {
 		t.Fatalf("Invalid return: w should not be nil")
 	}
@@ -261,7 +261,7 @@ func TestLogOutput(t *testing.T) {
 	l := make(Logger)
 
 	// Delete and open the output log without a timestamp (for a constant md5sum)
-	l.AddFilter("file", FINEST, NewFileLogWriter(testLogFile, false).SetFormat("[%L] %M"))
+	l.AddFilter("file", FINEST, NewFileLogWriter(testLogFile, false, false).SetFormat("[%L] %M"))
 	defer os.Remove(testLogFile)
 
 	// Send some log messages
@@ -333,6 +333,7 @@ func TestCountMallocs(t *testing.T) {
 	fmt.Printf("mallocs per unlogged sl.Logf(WARNING, \"%%s is a log message with level %%d\", \"This\", WARNING): %d\n", mallocs/N)
 }
 
+/*
 func TestXMLConfig(t *testing.T) {
 	const (
 		configfile = "example.xml"
@@ -449,7 +450,7 @@ func TestXMLConfig(t *testing.T) {
 	// Move XML log file
 	os.Rename(configfile, "examples/"+configfile) // Keep this so that an example with the documentation is available
 }
-
+*/
 func BenchmarkFormatLogRecord(b *testing.B) {
 	const updateEvery = 1
 	rec := &LogRecord{
@@ -510,7 +511,7 @@ func BenchmarkConsoleUtilNotLog(b *testing.B) {
 func BenchmarkFileLog(b *testing.B) {
 	sl := make(Logger)
 	b.StopTimer()
-	sl.AddFilter("file", INFO, NewFileLogWriter("benchlog.log", false))
+	sl.AddFilter("file", INFO, NewFileLogWriter("benchlog.log", false, false))
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
 		sl.Log(WARNING, "here", "This is a log message")
@@ -522,7 +523,7 @@ func BenchmarkFileLog(b *testing.B) {
 func BenchmarkFileNotLogged(b *testing.B) {
 	sl := make(Logger)
 	b.StopTimer()
-	sl.AddFilter("file", INFO, NewFileLogWriter("benchlog.log", false))
+	sl.AddFilter("file", INFO, NewFileLogWriter("benchlog.log", false, false))
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
 		sl.Log(DEBUG, "here", "This is a log message")
@@ -534,7 +535,7 @@ func BenchmarkFileNotLogged(b *testing.B) {
 func BenchmarkFileUtilLog(b *testing.B) {
 	sl := make(Logger)
 	b.StopTimer()
-	sl.AddFilter("file", INFO, NewFileLogWriter("benchlog.log", false))
+	sl.AddFilter("file", INFO, NewFileLogWriter("benchlog.log", false, false))
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
 		sl.Info("%s is a log message", "This")
@@ -546,13 +547,49 @@ func BenchmarkFileUtilLog(b *testing.B) {
 func BenchmarkFileUtilNotLog(b *testing.B) {
 	sl := make(Logger)
 	b.StopTimer()
-	sl.AddFilter("file", INFO, NewFileLogWriter("benchlog.log", false))
+	sl.AddFilter("file", INFO, NewFileLogWriter("benchlog.log", false, false))
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
 		sl.Debug("%s is a log message", "This")
 	}
 	b.StopTimer()
 	os.Remove("benchlog.log")
+}
+
+func TestRemoveOldDailyLogs(t *testing.T) {
+
+	for i := 0; i < 7; i++ {
+		fname := fmt.Sprintf("./config/test/forwarder.log.%d", i)
+		_, err := os.Create(fname)
+		if err != nil {
+			t.Fatalf("os.Create: %s", err.Error())
+		}
+		now := time.Now()
+		nDaysAgo := time.Hour * time.Duration(-(i * 24))
+
+		err = os.Chtimes(fname, now, now.Add(nDaysAgo))
+		if err != nil {
+			t.Fatalf("os.Chtimes: %s", err.Error())
+		}
+	}
+
+	log := make(Logger)
+	log.LoadConfiguration("./config/_test_xmlconfig.xml")
+	defer log.Close()
+
+	if _, ok := log["testconfig"]; !ok {
+		t.Fatalf("XMLConfig: Expected file logger")
+	}
+
+	if _, ok := log["testconfig"].LogWriter.(*FileLogWriter); !ok {
+		t.Fatalf("XMLConfig: Expected file to be *FileLogWriter, found %T", log["file"].LogWriter)
+	} else {
+		t.Logf("Found File Log Writer")
+	}
+
+	lw := log["testconfig"].LogWriter.(*FileLogWriter)
+	lw.RemoveOldDailyLogs(true)
+
 }
 
 // Benchmark results (darwin amd64 6g)
