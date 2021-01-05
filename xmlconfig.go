@@ -181,6 +181,7 @@ func xmlToFileLogWriter(filename string, props []xmlProperty, enabled bool) (*Fi
 	maxlines := 0
 	maxsize := 0
 	maxdays := 0
+	maxbackup := 5
 	daily := false
 	rotate := false
 	sanitize := false
@@ -198,6 +199,8 @@ func xmlToFileLogWriter(filename string, props []xmlProperty, enabled bool) (*Fi
 			maxsize = strToNumSuffix(strings.Trim(prop.Value, " \r\n"), 1024)
 		case "maxdays":
 			maxdays = strToNumSuffix(strings.Trim(prop.Value, " \r\n"), 1)
+		case "maxbackup":
+			maxbackup = strToNumSuffix(strings.Trim(prop.Value, " \r\n"), 1)
 		case "daily":
 			daily = strings.Trim(prop.Value, " \r\n") != "false"
 		case "rotate":
@@ -220,12 +223,16 @@ func xmlToFileLogWriter(filename string, props []xmlProperty, enabled bool) (*Fi
 		return nil, true
 	}
 
+	// Set maxsize and maxlines in NewFileLogWriter so we can
+	// determine if a rollover is required on start OR if we
+	// resume from the last modified file.
 	flw := NewFileLogWriter(file, rotate, daily, maxsize, maxlines)
 	flw.SetFormat(format)
 	//flw.SetRotateLines(maxlines)
 	//flw.SetRotateSize(maxsize)
 	flw.SetSanitize(sanitize)
 	flw.SetMaxDays(maxdays)
+	flw.SetRotateMaxBackup(maxbackup)
 	return flw, true
 }
 

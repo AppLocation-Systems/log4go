@@ -1,0 +1,26 @@
+{
+    "console": {
+        "enable": false,
+        "level": "FINE"
+    },
+    "files": [{
+        "enable": true,
+        "level": "DEBUG",
+        "filename":"./test/daily/forwarder.log",
+        "category": "testconfig",
+        "pattern": "%D %T %L  (%s) %M",
+        "rotate": true,
+        "maxsize": "",
+        "maxlines": "",
+        "maxdays": 5,
+        "daily": true
+    }],
+    "sockets": [{
+        "enable": false,
+        "level": "DEBUG",
+        "category": "TestSocket",
+        "pattern": "[%D %T] [%C] [%L] (%S) %M",
+        "addr": "127.0.0.1:12124",
+        "protocol":"udp"
+    }]
+}

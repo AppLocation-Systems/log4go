@@ -200,6 +200,9 @@ func jsonToFileLogWriter(filename string, ff *FileConfig) (*FileLogWriter, bool)
 		return nil, true
 	}
 
+	// Set maxsize and maxlines in NewFileLogWriter so we can
+	// determine if a rollover is required on start OR if we
+	// resume from the last modified file.
 	flw := NewFileLogWriter(file, rotate, daily, maxsize, maxlines)
 	flw.SetFormat(format)
 	//flw.SetRotateLines(maxlines)

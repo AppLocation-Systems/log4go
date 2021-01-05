@@ -62,10 +62,15 @@ func (w *FileLogWriter) Close() {
 func (w *FileLogWriter) FileInit(debug bool) (bool, error) {
 
 	ok := false
+
+	// Open most recent logfile for
+	// reading only.
 	fd, err := os.Open(w.filename)
 
 	if err != nil {
 
+		// File does exist but
+		// we still can't open it.
 		if !os.IsNotExist(err) {
 			ok = true
 		}
@@ -78,26 +83,40 @@ func (w *FileLogWriter) FileInit(debug bool) (bool, error) {
 
 	}
 
+	// Current logfile exists.
 	ok = true
 	defer fd.Close()
+
+	// Get info for current logfile.
 	info, err := fd.Stat()
 
 	if err != nil {
 		return ok, fmt.Errorf("FileInit: %s", err)
 	}
 
+	// Create scanner for calculating line
+	// numbers.
 	scanner := bufio.NewScanner(fd)
 
+	// Set the size (in bytes) of the current
+	// logfile to determine if rollover on start
+	// is required.
 	w.maxsize_cursize = int(info.Size())
 
+	// Set the number of lines in the current
+	// logfile to determine if rollover on
+	// start is required.
 	for scanner.Scan() {
 		w.maxlines_curlines++
 	}
 
 	if debug {
-		fmt.Printf("Total Size: %d, Total Lines: %d\n", w.maxsize_cursize, w.maxlines_curlines)
+		fmt.Printf("Total Size: %d, Total Lines: %d\n",
+			w.maxsize_cursize, w.maxlines_curlines)
 	}
 
+	// Set the file opendate for the current logfile
+	// to determine if rollover on start is required
 	modifiedtime := info.ModTime()
 	w.daily_opendate = modifiedtime.Day()
 
@@ -208,12 +227,9 @@ func NewFileLogWriter(fname string, rotate bool, daily bool, maxsize int, maxlin
 		sanitize:  false, // set to false so as not to break compatibility
 	}
 
-	// TODO:
-	// Fix this for Kevin, since we want the log to resume
-	// writing to the last file it left off at instead of rolling
-	// over a new file everytime we restart.
-
-	_, err := w.FileInit(true)
+	// Get the size, linecount, and opendate for the
+	// current logfile if it exists
+	fileExists, err := w.FileInit(true)
 
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "FileLogWriter(%q): %s\n", w.filename, err)
@@ -221,19 +237,30 @@ func NewFileLogWriter(fname string, rotate bool, daily bool, maxsize int, maxlin
 
 	now := time.Now()
 
-	if (w.maxlines > 0 && w.maxlines_curlines >= w.maxlines) ||
+	// If the logfile already exists and any of the rotate conditions are
+	// satisfied then rollover on start. Otherwise, ensure the current logfile is
+	// open for writing.
+	if fileExists && ((w.maxlines > 0 && w.maxlines_curlines >= w.maxlines) ||
 		(w.maxsize > 0 && w.maxsize_cursize >= w.maxsize) ||
-		(w.daily && now.Day() != w.daily_opendate) {
+		(w.daily && now.Day() != w.daily_opendate)) {
+
 		if err := w.intRotate(); err != nil {
 			fmt.Fprintf(os.Stderr, "FileLogWriter(%q): %s\n", w.filename, err)
 			return nil
 		}
+
 	} else {
+
+		// Either the file doesn't exist OR we are not ready
+		// to rollover yet. In either case, make sure the file is
+		// opened in append mode for writing.
 		fd, err := os.OpenFile(w.filename, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0660)
 		if err != nil {
 			fmt.Printf("Error Opening File: %s", err.Error())
 		}
+
 		w.file = fd
+
 	}
 
 	go func() {
