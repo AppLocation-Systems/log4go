@@ -261,6 +261,12 @@ func NewFileLogWriter(fname string, rotate bool, daily bool, maxsize int, maxlin
 
 		w.file = fd
 
+		// If this is the first time opening this file
+		// then set the daily open date to the current date
+		if !fileExists {
+			w.daily_opendate = now.Day()
+		}
+
 	}
 
 	go func() {
