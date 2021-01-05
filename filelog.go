@@ -3,6 +3,7 @@
 package log4go
 
 import (
+	"bufio"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -40,8 +41,9 @@ type FileLogWriter struct {
 	daily_opendate int
 
 	// Keep old logfiles (.001, .002, etc)
-	rotate    bool
-	maxbackup int
+	rotate        bool
+	rotateOnStart bool
+	maxbackup     int
 
 	// Sanitize newlines to prevent log injection
 	sanitize bool
@@ -55,6 +57,51 @@ func (w *FileLogWriter) LogWrite(rec *LogRecord) {
 func (w *FileLogWriter) Close() {
 	close(w.rec)
 	w.file.Sync()
+}
+
+func (w *FileLogWriter) FileInit(debug bool) (bool, error) {
+
+	ok := false
+	fd, err := os.Open(w.filename)
+
+	if err != nil {
+
+		if !os.IsNotExist(err) {
+			ok = true
+		}
+
+		if debug {
+			fmt.Printf("Logfile Exists?: %v", ok)
+		}
+
+		return ok, fmt.Errorf("FileInit: %s", err)
+
+	}
+
+	ok = true
+	defer fd.Close()
+	info, err := fd.Stat()
+
+	if err != nil {
+		return ok, fmt.Errorf("FileInit: %s", err)
+	}
+
+	scanner := bufio.NewScanner(fd)
+
+	w.maxsize_cursize = int(info.Size())
+
+	for scanner.Scan() {
+		w.maxlines_curlines++
+	}
+
+	if debug {
+		fmt.Printf("Total Size: %d, Total Lines: %d\n", w.maxsize_cursize, w.maxlines_curlines)
+	}
+
+	modifiedtime := info.ModTime()
+	w.daily_opendate = modifiedtime.Day()
+
+	return ok, nil
 }
 
 func (w *FileLogWriter) isOlderThan(t time.Time) bool {
@@ -146,7 +193,7 @@ func (w *FileLogWriter) RemoveOldDailyLogs(debug bool) error {
 //
 // The standard log-line format is:
 //   [%D %T] [%L] (%S) %M
-func NewFileLogWriter(fname string, rotate bool, daily bool) *FileLogWriter {
+func NewFileLogWriter(fname string, rotate bool, daily bool, maxsize int, maxlines int) *FileLogWriter {
 	w := &FileLogWriter{
 		rec:       make(chan *LogRecord, LogBufferLength),
 		rot:       make(chan bool),
@@ -154,6 +201,8 @@ func NewFileLogWriter(fname string, rotate bool, daily bool) *FileLogWriter {
 		format:    "[%D %T] [%L] (%S) %M",
 		daily:     daily,
 		rotate:    rotate,
+		maxsize:   maxsize,
+		maxlines:  maxlines,
 		maxbackup: 5,
 		maxdays:   4,
 		sanitize:  false, // set to false so as not to break compatibility
@@ -163,9 +212,28 @@ func NewFileLogWriter(fname string, rotate bool, daily bool) *FileLogWriter {
 	// Fix this for Kevin, since we want the log to resume
 	// writing to the last file it left off at instead of rolling
 	// over a new file everytime we restart.
-	if err := w.intRotate(); err != nil {
+
+	_, err := w.FileInit(true)
+
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "FileLogWriter(%q): %s\n", w.filename, err)
-		return nil
+	}
+
+	now := time.Now()
+
+	if (w.maxlines > 0 && w.maxlines_curlines >= w.maxlines) ||
+		(w.maxsize > 0 && w.maxsize_cursize >= w.maxsize) ||
+		(w.daily && now.Day() != w.daily_opendate) {
+		if err := w.intRotate(); err != nil {
+			fmt.Fprintf(os.Stderr, "FileLogWriter(%q): %s\n", w.filename, err)
+			return nil
+		}
+	} else {
+		fd, err := os.OpenFile(w.filename, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0660)
+		if err != nil {
+			fmt.Printf("Error Opening File: %s", err.Error())
+		}
+		w.file = fd
 	}
 
 	go func() {
@@ -233,7 +301,7 @@ func (w *FileLogWriter) intRotate() error {
 		w.file.Close()
 	}
 	// If we are keeping log files, move it to the next available number
-	if w.rotate {
+	if w.rotate || w.rotateOnStart {
 		info, err := os.Stat(w.filename)
 		// _, err = os.Lstat(w.filename)
 
@@ -382,8 +450,8 @@ func (w *FileLogWriter) SetSanitize(sanitize bool) *FileLogWriter {
 
 // NewXMLLogWriter is a utility method for creating a FileLogWriter set up to
 // output XML record log messages instead of line-based ones.
-func NewXMLLogWriter(fname string, rotate bool, daily bool) *FileLogWriter {
-	return NewFileLogWriter(fname, rotate, daily).SetFormat(
+func NewXMLLogWriter(fname string, rotate bool, daily bool, maxsize int, maxlines int) *FileLogWriter {
+	return NewFileLogWriter(fname, rotate, daily, maxsize, maxlines).SetFormat(
 		`	<record level="%L">
 		<timestamp>%D %T</timestamp>
 		<source>%S</source>
