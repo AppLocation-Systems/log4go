@@ -76,7 +76,7 @@ func (w *FileLogWriter) FileInit(debug bool) (bool, error) {
 		}
 
 		if debug {
-			fmt.Printf("Logfile Exists?: %v", ok)
+			fmt.Printf("Logfile Exists?: %v\n", ok)
 		}
 
 		return ok, fmt.Errorf("FileInit: %s", err)
@@ -229,11 +229,7 @@ func NewFileLogWriter(fname string, rotate bool, daily bool, maxsize int, maxlin
 
 	// Get the size, linecount, and opendate for the
 	// current logfile if it exists
-	fileExists, err := w.FileInit(true)
-
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "FileLogWriter(%q): %s\n", w.filename, err)
-	}
+	fileExists, _ := w.FileInit(false)
 
 	now := time.Now()
 
