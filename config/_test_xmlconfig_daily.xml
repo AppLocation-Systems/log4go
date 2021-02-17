@@ -1,0 +1,14 @@
+<logging>
+<filter enabled="true">
+    <tag>testconfig</tag>
+    <type>file</type>
+    <level>DEBUG</level>
+    <property name="filename">./test/daily/forwarder.log</property>
+    <property name="format">%D %T %L  (%s) %M</property>
+    <property name="rotate">true</property> <!-- true enables log rotation, otherwise append -->
+    <property name="maxsize">0M</property> <!-- \d+[KMG]? Suffixes are in terms of 2**10 -->
+    <property name="maxdays">5</property> <!-- \d+[KMG]? Suffixes are in terms of 2**10 -->
+    <property name="maxlines">0K</property> <!-- \d+[KMG]? Suffixes are in terms of thousands -->
+    <property name="daily">true</property> <!-- Automatically rotates when a log message is written after midnight -->
+  </filter>
+</logging>

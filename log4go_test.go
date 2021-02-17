@@ -3,6 +3,7 @@
 package log4go
 
 import (
+	"bufio"
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
@@ -153,7 +154,7 @@ func TestFileLogWriter(t *testing.T) {
 	}(LogBufferLength)
 	LogBufferLength = 0
 
-	w := NewFileLogWriter(testLogFile, false, false)
+	w := NewFileLogWriter(testLogFile, false, false, 0, 0)
 	if w == nil {
 		t.Fatalf("Invalid return: w should not be nil")
 	}
@@ -176,7 +177,7 @@ func TestXMLLogWriter(t *testing.T) {
 	}(LogBufferLength)
 	LogBufferLength = 0
 
-	w := NewXMLLogWriter(testLogFile, false, false)
+	w := NewXMLLogWriter(testLogFile, false, false, 0, 0)
 	if w == nil {
 		t.Fatalf("Invalid return: w should not be nil")
 	}
@@ -261,7 +262,7 @@ func TestLogOutput(t *testing.T) {
 	l := make(Logger)
 
 	// Delete and open the output log without a timestamp (for a constant md5sum)
-	l.AddFilter("file", FINEST, NewFileLogWriter(testLogFile, false, false).SetFormat("[%L] %M"))
+	l.AddFilter("file", FINEST, NewFileLogWriter(testLogFile, false, false, 0, 0).SetFormat("[%L] %M"))
 	defer os.Remove(testLogFile)
 
 	// Send some log messages
@@ -451,6 +452,335 @@ func TestXMLConfig(t *testing.T) {
 	os.Rename(configfile, "examples/"+configfile) // Keep this so that an example with the documentation is available
 }
 */
+
+func TestRemoveOldDailyLogs(t *testing.T) {
+
+	// Create 7 log files, each one being 1 day older
+	// than the previous
+	for i := 0; i < 7; i++ {
+		fname := fmt.Sprintf("./test/daily/forwarder.log.%d", i)
+		_, err := os.Create(fname)
+		if err != nil {
+			t.Fatalf("os.Create: %s", err.Error())
+		}
+		now := time.Now()
+		nDaysAgo := time.Hour * time.Duration(-(i * 24))
+
+		err = os.Chtimes(fname, now, now.Add(nDaysAgo))
+		if err != nil {
+			t.Fatalf("os.Chtimes: %s", err.Error())
+		}
+	}
+
+	// Load log configuration to make sure the
+	// max_days parameter is loaded correctly
+	log := make(Logger)
+	log.LoadConfiguration("./config/_test_xmlconfig_daily.xml")
+	defer log.Close()
+
+	// Get the underlying *FileLogWriter for
+	// testing
+	if _, ok := log["testconfig"]; !ok {
+		t.Fatalf("XMLConfig: Expected file logger")
+	}
+
+	if _, ok := log["testconfig"].LogWriter.(*FileLogWriter); !ok {
+		t.Fatalf("XMLConfig: Expected file to be *FileLogWriter, found %T", log["file"].LogWriter)
+	} else {
+		t.Logf("Found File Log Writer")
+	}
+
+	// Test Daily log removal. Logs 4 and 5 should be removed
+	// while logs 0,1,2 and 3 are retained.
+	lw := log["testconfig"].LogWriter.(*FileLogWriter)
+	lw.RemoveOldDailyLogs(true)
+
+}
+
+func TestJsonDaily(t *testing.T) {
+
+	// Create 7 log files, each one being 1 day older
+	// than the previous
+	for i := 0; i < 7; i++ {
+		fname := fmt.Sprintf("./test/daily/forwarder.log.%d", i)
+		_, err := os.Create(fname)
+		if err != nil {
+			t.Fatalf("os.Create: %s", err.Error())
+		}
+		now := time.Now()
+		nDaysAgo := time.Hour * time.Duration(-(i * 24))
+
+		err = os.Chtimes(fname, now, now.Add(nDaysAgo))
+		if err != nil {
+			t.Fatalf("os.Chtimes: %s", err.Error())
+		}
+	}
+
+	// Load log configuration to make sure the
+	// max_days parameter is loaded correctly
+	log := make(Logger)
+	log.LoadJsonConfiguration("./config/_test_jsonconfig_daily.json")
+
+	defer log.Close()
+
+	// Get the underlying *FileLogWriter for
+	// testing
+	if _, ok := log["testconfig"]; !ok {
+		t.Fatalf("JSONConfig: Expected file logger")
+	}
+
+	if _, ok := log["testconfig"].LogWriter.(*FileLogWriter); !ok {
+		t.Fatalf("JSONConfig: Expected file to be *FileLogWriter, found %T", log["file"].LogWriter)
+	} else {
+		t.Logf("Found File Log Writer")
+	}
+
+	// Test Daily log removal. Logs 4 and 5 should be removed
+	// while logs 0,1,2 and 3 are retained.
+	lw := log["testconfig"].LogWriter.(*FileLogWriter)
+	lw.RemoveOldDailyLogs(true)
+
+}
+
+func TestResumeLog(t *testing.T) {
+
+	// Load log configuration to make sure the
+	// max_days parameter is loaded correctly
+	log := make(Logger)
+	log.LoadConfiguration("./config/_test_xmlconfig_lines.xml")
+
+	for i := 0; i < 5; i++ {
+		log.Info("Printing Line: %d", i+1)
+	}
+
+	log.Close()
+
+	// Load log configuration to make sure the
+	// max_days parameter is loaded correctly
+	log = make(Logger)
+	log.LoadConfiguration("./config/_test_xmlconfig_lines.xml")
+
+	for i := 0; i < 6; i++ {
+		log.Info("Printing Line: %d", i+1)
+	}
+
+	log.Close()
+
+	// Get info for all files in log directory
+
+	logDir := "./test/lines"
+	logfiles, err := ioutil.ReadDir(logDir)
+
+	if err != nil {
+		t.Errorf("Clean Dir: %s", err)
+	}
+
+	for _, file := range logfiles {
+
+		filePath := logDir + string(os.PathSeparator) + file.Name()
+
+		fd, err := os.Open(filePath)
+
+		if err != nil {
+			t.Errorf("OpenFile: %s\n", err)
+			continue
+		}
+
+		lines := 0
+		scanner := bufio.NewScanner(fd)
+
+		t.Logf("Contents of File %s\n", filePath)
+		for scanner.Scan() {
+			t.Log(scanner.Text())
+			lines++
+		}
+
+		if file.Name() == "forwarder.log" &&
+			lines != 1 {
+			t.Errorf("Incorrect Number of Lines in %s\n", filePath)
+		}
+
+		if file.Name() == "forwarder.log.1" &&
+			lines != 10 {
+			t.Errorf("Incorrect Number of Lines in %s\n", filePath)
+		}
+
+		t.Log("\n\n")
+		err = fd.Close()
+
+		if err != nil {
+			t.Errorf("Close File: %s, %s", filePath, err)
+		}
+
+		err = os.Remove(filePath)
+
+		if err != nil {
+			t.Errorf("Clean Dir: %s", err)
+		}
+	}
+
+}
+
+func TestResumeLogOnSize(t *testing.T) {
+
+	// Load log configuration to make sure the
+	// max_days parameter is loaded correctly
+	log := make(Logger)
+	log.LoadConfiguration("./config/_test_xmlconfig_size.xml")
+
+	for i := 0; i < 5; i++ {
+		log.Info("Printing Line: %d", i+1)
+	}
+
+	log.Close()
+
+	// Load log configuration to make sure the
+	// max_days parameter is loaded correctly
+	log = make(Logger)
+	log.LoadConfiguration("./config/_test_xmlconfig_size.xml")
+
+	for i := 0; i < 6; i++ {
+		log.Info("Printing Line: %d", i+1)
+	}
+
+	log.Close()
+
+	// Get info for all files in log directory
+
+	logDir := "./test/lines"
+	logfiles, err := ioutil.ReadDir(logDir)
+
+	if err != nil {
+		t.Errorf("Clean Dir: %s", err)
+	}
+
+	for _, file := range logfiles {
+
+		filePath := logDir + string(os.PathSeparator) + file.Name()
+
+		fd, err := os.Open(filePath)
+
+		if err != nil {
+			t.Errorf("OpenFile: %s\n", err)
+			continue
+		}
+
+		lines := 0
+		scanner := bufio.NewScanner(fd)
+
+		t.Logf("Contents of File %s\n", filePath)
+		for scanner.Scan() {
+			t.Log(scanner.Text())
+			lines++
+		}
+
+		if file.Name() == "forwarder.log" &&
+			lines != 1 {
+			t.Errorf("Incorrect Number of Lines in %s\n", filePath)
+		}
+
+		if file.Name() == "forwarder.log.1" &&
+			lines != 5 {
+			t.Errorf("Incorrect Number of Lines in %s\n", filePath)
+		}
+
+		if file.Name() == "forwarder.log.2" &&
+			lines != 5 {
+			t.Errorf("Incorrect Number of Lines in %s\n", filePath)
+		}
+
+		t.Log("\n\n")
+		err = fd.Close()
+
+		if err != nil {
+			t.Errorf("Close File: %s, %s", filePath, err)
+		}
+
+		err = os.Remove(filePath)
+
+		if err != nil {
+			t.Errorf("Clean Dir: %s", err)
+		}
+	}
+
+}
+
+func TestRotateOnStart(t *testing.T) {
+
+	// Load log configuration to make sure the
+	// max_days parameter is loaded correctly
+	log := make(Logger)
+	log.LoadConfiguration("./config/_test_xmlconfig_lines.xml")
+
+	for i := 0; i < 10; i++ {
+		log.Info("Printing Line: %d", i+1)
+	}
+
+	log.Close()
+
+	// Load log configuration to make sure the
+	// max_days parameter is loaded correctly
+	log = make(Logger)
+	log.LoadConfiguration("./config/_test_xmlconfig_lines.xml")
+	log.Info("First Line After Restart")
+
+	log.Close()
+
+	// Get info for all files in log directory
+
+	logDir := "./test/lines"
+	logfiles, err := ioutil.ReadDir(logDir)
+
+	if err != nil {
+		t.Errorf("Clean Dir: %s", err)
+	}
+
+	for _, file := range logfiles {
+
+		filePath := logDir + string(os.PathSeparator) + file.Name()
+
+		fd, err := os.Open(filePath)
+
+		if err != nil {
+			t.Errorf("OpenFile: %s\n", err)
+			continue
+		}
+
+		lines := 0
+		scanner := bufio.NewScanner(fd)
+
+		t.Logf("Contents of File %s\n", filePath)
+		for scanner.Scan() {
+			t.Log(scanner.Text())
+			lines++
+		}
+
+		if file.Name() == "forwarder.log" &&
+			lines != 1 {
+			t.Errorf("Incorrect Number of Lines in %s\n", filePath)
+		}
+
+		if file.Name() == "forwarder.log.1" &&
+			lines != 10 {
+			t.Errorf("Incorrect Number of Lines in %s\n", filePath)
+		}
+
+		t.Log("\n\n")
+		err = fd.Close()
+
+		if err != nil {
+			t.Errorf("Close File: %s, %s", filePath, err)
+		}
+
+		err = os.Remove(filePath)
+
+		if err != nil {
+			t.Errorf("Clean Dir: %s", err)
+		}
+	}
+
+}
+
 func BenchmarkFormatLogRecord(b *testing.B) {
 	const updateEvery = 1
 	rec := &LogRecord{
@@ -511,7 +841,7 @@ func BenchmarkConsoleUtilNotLog(b *testing.B) {
 func BenchmarkFileLog(b *testing.B) {
 	sl := make(Logger)
 	b.StopTimer()
-	sl.AddFilter("file", INFO, NewFileLogWriter("benchlog.log", false, false))
+	sl.AddFilter("file", INFO, NewFileLogWriter("benchlog.log", false, false, 0, 0))
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
 		sl.Log(WARNING, "here", "This is a log message")
@@ -523,7 +853,7 @@ func BenchmarkFileLog(b *testing.B) {
 func BenchmarkFileNotLogged(b *testing.B) {
 	sl := make(Logger)
 	b.StopTimer()
-	sl.AddFilter("file", INFO, NewFileLogWriter("benchlog.log", false, false))
+	sl.AddFilter("file", INFO, NewFileLogWriter("benchlog.log", false, false, 0, 0))
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
 		sl.Log(DEBUG, "here", "This is a log message")
@@ -535,7 +865,7 @@ func BenchmarkFileNotLogged(b *testing.B) {
 func BenchmarkFileUtilLog(b *testing.B) {
 	sl := make(Logger)
 	b.StopTimer()
-	sl.AddFilter("file", INFO, NewFileLogWriter("benchlog.log", false, false))
+	sl.AddFilter("file", INFO, NewFileLogWriter("benchlog.log", false, false, 0, 0))
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
 		sl.Info("%s is a log message", "This")
@@ -547,49 +877,13 @@ func BenchmarkFileUtilLog(b *testing.B) {
 func BenchmarkFileUtilNotLog(b *testing.B) {
 	sl := make(Logger)
 	b.StopTimer()
-	sl.AddFilter("file", INFO, NewFileLogWriter("benchlog.log", false, false))
+	sl.AddFilter("file", INFO, NewFileLogWriter("benchlog.log", false, false, 0, 0))
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
 		sl.Debug("%s is a log message", "This")
 	}
 	b.StopTimer()
 	os.Remove("benchlog.log")
-}
-
-func TestRemoveOldDailyLogs(t *testing.T) {
-
-	for i := 0; i < 7; i++ {
-		fname := fmt.Sprintf("./config/test/forwarder.log.%d", i)
-		_, err := os.Create(fname)
-		if err != nil {
-			t.Fatalf("os.Create: %s", err.Error())
-		}
-		now := time.Now()
-		nDaysAgo := time.Hour * time.Duration(-(i * 24))
-
-		err = os.Chtimes(fname, now, now.Add(nDaysAgo))
-		if err != nil {
-			t.Fatalf("os.Chtimes: %s", err.Error())
-		}
-	}
-
-	log := make(Logger)
-	log.LoadConfiguration("./config/_test_xmlconfig.xml")
-	defer log.Close()
-
-	if _, ok := log["testconfig"]; !ok {
-		t.Fatalf("XMLConfig: Expected file logger")
-	}
-
-	if _, ok := log["testconfig"].LogWriter.(*FileLogWriter); !ok {
-		t.Fatalf("XMLConfig: Expected file to be *FileLogWriter, found %T", log["file"].LogWriter)
-	} else {
-		t.Logf("Found File Log Writer")
-	}
-
-	lw := log["testconfig"].LogWriter.(*FileLogWriter)
-	lw.RemoveOldDailyLogs(true)
-
 }
 
 // Benchmark results (darwin amd64 6g)

@@ -34,12 +34,13 @@ type FileConfig struct {
 	// Recommended: "[%D %T] [%C] [%L] (%S) %M"//
 	Pattern string `json:"pattern"`
 
-	Rotate   bool   `json:"rotate"`
-	Maxsize  string `json:"maxsize"`  // \d+[KMG]? Suffixes are in terms of 2**10
-	Maxlines string `json:"maxlines"` //\d+[KMG]? Suffixes are in terms of thousands
-	Maxbackup int `json:"maxbackup"` //Max number of backup files
-	Daily    bool   `json:"daily"`    //Automatically rotates by day
-	Sanitize bool   `json:"sanitize"` //Sanitize newlines to prevent log injection
+	Rotate    bool   `json:"rotate"`
+	Maxsize   string `json:"maxsize"`  // \d+[KMG]? Suffixes are in terms of 2**10
+	Maxlines  string `json:"maxlines"` //\d+[KMG]? Suffixes are in terms of thousands
+	MaxDays   int    `json:"maxdays"`
+	Maxbackup int    `json:"maxbackup"` //Max number of backup files
+	Daily     bool   `json:"daily"`     //Automatically rotates by day
+	Sanitize  bool   `json:"sanitize"`  //Sanitize newlines to prevent log injection
 }
 
 type SocketConfig struct {
@@ -167,6 +168,7 @@ func jsonToFileLogWriter(filename string, ff *FileConfig) (*FileLogWriter, bool)
 	format := "[%D %T] [%C] [%L] (%S) %M"
 	maxlines := 0
 	maxsize := 0
+	maxdays := 0
 	maxbackup := 5
 	daily := false
 	rotate := false
@@ -187,6 +189,9 @@ func jsonToFileLogWriter(filename string, ff *FileConfig) (*FileLogWriter, bool)
 	if ff.Maxbackup > 0 {
 		maxbackup = ff.Maxbackup
 	}
+	if ff.MaxDays > 0 {
+		maxdays = ff.MaxDays
+	}
 	daily = ff.Daily
 	rotate = ff.Rotate
 	sanitize = ff.Sanitize
@@ -195,10 +200,14 @@ func jsonToFileLogWriter(filename string, ff *FileConfig) (*FileLogWriter, bool)
 		return nil, true
 	}
 
-	flw := NewFileLogWriter(file, rotate, daily)
+	// Set maxsize and maxlines in NewFileLogWriter so we can
+	// determine if a rollover is required on start OR if we
+	// resume from the last modified file.
+	flw := NewFileLogWriter(file, rotate, daily, maxsize, maxlines)
 	flw.SetFormat(format)
-	flw.SetRotateLines(maxlines)
-	flw.SetRotateSize(maxsize)
+	//flw.SetRotateLines(maxlines)
+	//flw.SetRotateSize(maxsize)
+	flw.SetMaxDays(maxdays)
 	flw.SetRotateMaxBackup(maxbackup)
 	flw.SetSanitize(sanitize)
 	return flw, true
